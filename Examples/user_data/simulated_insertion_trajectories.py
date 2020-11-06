@@ -135,42 +135,20 @@ def add_even_arc(zrot, xrotations = (40, 24, 8)):
     for xrot in xrotations:
         probe_bounds.append(add_probe(scene, xrot, zrot, convergence_point))
 
-scene = Scene()
+def get_structures_for_probe(bounds, npoints=10):
 
-scene.add_brain_regions(["P","MRN"], alpha=0.4) # select brain regions to highlight
+    """
+    Prints out the structures along a given probe trajectory
 
-add_skull(scene)
+    Inputs:
+    =======
+    bounds - list of 6 values
+        min/max bounds for x, y, and z axes
 
-probe_bounds = []
+    npoints - (optional) int
+        number of points along each probe trajectory
 
-###################################################
-
-# set convergence point
-
-convergence_point = [12000, 7000, 5700] # for pons
-
-# add an arc (odd/even with offset in degrees)
-
-add_odd_arc(-48)
-
-# update convergence point
-
-#convergence_point = [6500, 8500, 5700] # default central location
-
-#add_even_arc(-32)
-
-#add_odd_arc(-16)
-
-#add_even_arc(0)
-
-#add_odd_arc(16)
-
-#add_even_arc(32)
-
-#add_odd_arc(48)
-
-
-def get_structures_for_probe(bounds, npoints):
+    """
 
     structures = []
 
@@ -193,6 +171,41 @@ def get_structures_for_probe(bounds, npoints):
 
     print(structures)
 
-[get_structures_for_probe(bounds, 10) for bounds in probe_bounds]
+
+scene = Scene()
+
+add_skull(scene)
+
+probe_bounds = []
+
+
+#####################################################
+
+# MODIFY THIS SECTION
+
+scene.add_brain_regions(["P","MRN"], alpha=0.4) # select brain regions to highlight
+
+convergence_point = [12000, 7000, 5700] # for pons
+
+add_odd_arc(-48)
+
+#convergence_point = [6500, 8500, 5700] # default central location
+
+#add_even_arc(-32)
+
+#add_odd_arc(-16)
+
+#add_even_arc(0)
+
+#add_odd_arc(16)
+
+#add_even_arc(32)
+
+#add_odd_arc(48)
+
+######################################################
+
+
+[get_structures_for_probe(bounds) for bounds in probe_bounds]
 
 scene.render()
