@@ -5,11 +5,21 @@ from accepts import accepts
 # ---------------------------------------------------------------------------- #
 
 
+def listify(obj):
+    if isinstance(obj, list):
+        return obj
+    elif isinstance(obj, tuple):
+        return list(obj)
+    else:
+        return [obj]
+
+
 @accepts((list, tuple))
 def flatten(lst):
     """
         Flattens a nested list
     """
+    lst = [listify(item) for item in lst]
     return [item for sublist in lst for item in sublist]
 
 
@@ -132,8 +142,8 @@ def make_optic_canula_cylinder(
         return
 
     # Offset position
-    for i, offset in enumerate(offsets):
-        pos[i] += offset
+    # for i, offset in enumerate(offsets):
+    #     pos[i] += offset
 
     # Get coordinates of upper face
     bounds = root.bounds()

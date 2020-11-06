@@ -16,6 +16,7 @@ from brainrender.Utils.camera import (
     set_camera,
     get_camera_params,
 )
+from brainrender.Utils.data_manipulation import flatten
 from rich import print
 from pyinspect._colors import mocassin, orange
 
@@ -29,9 +30,7 @@ mtx = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
 
 
 class Render(Enhanced):
-    _axes_order_corrected = (
-        False  # at first render the axes orders is corrected
-    )
+    transform_applied = False
 
     def __init__(
         self,
@@ -103,6 +102,14 @@ class Render(Enhanced):
             vedosettings.screenshotTransparentBackground = False
             vedosettings.useFXAA = True
 
+    @property
+    def to_render(self):
+        return [
+            a.mesh
+            for a in flatten(self.actors) + flatten(self.actors_labels)
+            if a.mesh is not None
+        ]
+
     def _make_custom_axes(self):
         """
             When using `ruler` axes (vedy style 7), we need to 
@@ -138,7 +145,7 @@ class Render(Enhanced):
         plt.renderer.AddActor(rulax)
         plt.axes_instances[0] = rulax
 
-        return
+        return plt
 
     def _correct_axes(self):
         """
@@ -146,45 +153,57 @@ class Render(Enhanced):
             is applied to each actor's points to correct orientation
             mismatches: https://github.com/brainglobe/bg-atlasapi/issues/73
         """
-        self._axes_order_corrected = True
+        self.transform_applied = True
 
         # Flip every actor's orientation
-        _silhouettes = []
         for actor in self.actors:
             try:
                 _name = actor.name
+
+                if _name is None:
+                    _name = ""
             except AttributeError:
                 """ not all scene objects will have a name """
                 continue
 
-            if _name != "silhouette":
-                try:
-                    actor.applyTransform(mtx).reverse()
-                except AttributeError:
-                    pass
-            else:
-                """
-                    Silhouettes don't transform properly,
-                    we need to re-generate them
-                """
-                _silhouettes.append(actor)
+            # Transform the actors that need to be transform
+            try:
+                if not actor._is_transformed:
+                    actor.mesh.applyTransform(mtx).reverse()
+                    actor._is_transformed = True
 
-        for sil in _silhouettes:
-            self.actors.pop(self.actors.index(sil))
-            self.add_silhouette(sil._original_mesh)
-            del sil
+            except AttributeError:
+                pass
+
+        # Make labels
+        for actor in self.actors:
+            try:
+                if actor._needs_label:
+                    self.actors_labels.extend(actor.make_label(self.atlas))
+            except AttributeError:
+                pass
+
+        # Make silhouettes
+        silhouettes = []
+        for actor in self.actors:
+            try:
+                if actor._needs_silhouette:
+                    silhouettes.append(actor.make_silhouette())
+            except AttributeError:
+                pass
+        self.actors.extend(silhouettes)
 
     def apply_render_style(self):
         if brainrender.SHADER_STYLE is None:  # No style to apply
             return
 
-        for actor in self.actors:
+        for actor in self.actors + self.actors_labels:
             if actor is not None:
                 try:
                     if brainrender.SHADER_STYLE != "cartoon":
-                        actor.lighting(style=brainrender.SHADER_STYLE)
+                        actor.mesh.lighting(style=brainrender.SHADER_STYLE)
                     else:
-                        actor.lighting("off")
+                        actor.mesh.lighting("off")
                 except AttributeError:
                     pass  # Some types of actors such as Text 2D don't have this attribute!
 
@@ -194,7 +213,6 @@ class Render(Enhanced):
         """
         Takes care of rendering the scene
         """
-        self.apply_render_style()
 
         if not video:
             if (
@@ -225,13 +243,6 @@ class Render(Enhanced):
         if zoom is None and not video:
             zoom = 1.2 if brainrender.WHOLE_SCREEN else 1.5
 
-        # Make mesh labels follow the camera
-        if not self.jupyter:
-            for txt in self.actors_labels:
-                txt.followCamera(self.plotter.camera)
-
-        self.is_rendered = True
-
         args_dict = dict(
             interactive=interactive,
             zoom=zoom,
@@ -243,14 +254,20 @@ class Render(Enhanced):
             args_dict["offscreen"] = True
 
         if self.make_custom_axes:
-            self._make_custom_axes()
+            self.plotter = self._make_custom_axes()
             self.make_custom_axes = False
 
         # Correct axes orientations
-        if not self._axes_order_corrected:
-            self._correct_axes()
+        self._correct_axes()
 
-        show(*self.actors, *self.actors_labels, **args_dict)
+        # Make mesh labels follow the camera
+        if not self.jupyter:
+            for txt in self.actors_labels:
+                txt.followCamera(self.plotter.camera)
+        self.apply_render_style()
+
+        self.is_rendered = True
+        show(*self.to_render, **args_dict)
 
     def close(self):
         closePlotter()
@@ -269,7 +286,7 @@ class Render(Enhanced):
 
         # Create new plotter and save to file
         plt = Plotter()
-        plt.add(self.actors)
+        plt.add(self.to_render)
         plt = plt.show(interactive=False)
         plt.camera[-2] = -1
 
@@ -302,8 +319,9 @@ class Render(Enhanced):
         elif key == "c":
             print(f"Camera parameters:\n{get_camera_params(scene=self)}")
 
-    def take_screenshot(self, screenshots_folder=None,
-                        screenshot_name=None, scale=None):
+    def take_screenshot(
+        self, screenshots_folder=None, screenshot_name=None, scale=None
+    ):
         """
         :param screenshots_folder: folder where the screenshot will be saved
         :param screenshot_name: name of the saved file
@@ -313,15 +331,17 @@ class Render(Enhanced):
 
         if screenshots_folder is None:
             screenshots_folder = Path(
-                self.screenshot_kwargs.get("folder",
-                                           brainrender.DEFAULT_SCREENSHOT_FOLDER))
+                self.screenshot_kwargs.get(
+                    "folder", brainrender.DEFAULT_SCREENSHOT_FOLDER
+                )
+            )
         screenshots_folder.mkdir(exist_ok=True)
 
         if screenshot_name is None:
             name = self.screenshot_kwargs.get("name", "screenshot")
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             file_format = self.screenshot_kwargs.get("format", ".png")
-            screenshot_name = f"{name}_{timestamp}.{file_format}"
+            screenshot_name = f"{name}_{timestamp}{file_format}"
 
         if not self.is_rendered:
             print(
